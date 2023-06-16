@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package proto;
+option go_package = "./rpc";
+message RequestForward{
+  bytes data = 1;
+}
+
+message RequestForwardResponse{
+  int32 code = 1;
+  string message = 2;
+}
+
+service Forward{
+  rpc Route (RequestForward) returns (RequestForwardResponse){};
+}
