@@ -72,11 +72,11 @@ type service struct {
 	logger     zerolog.Logger
 	shutdownCh chan struct{}
 
-	raftNotifyCh  chan bool
-	raftNode      *raft.Raft
-	fsm           raft2.FSM
-	isLeader      atomic.Bool
-	leaderAddress atomic.String
+	raftNotifyCh     chan bool
+	raftNode         *raft.Raft
+	fsm              raft2.FSM
+	isLeader         atomic.Bool
+	leaderRpcAddress atomic.String
 
 	serfNode    *serf.Serf
 	serfEventCh chan serf.Event
@@ -96,15 +96,14 @@ func SetUpServer() Service {
 	srv.raftNotifyCh = make(chan bool, 10)
 	raftNode, fsm, err := setupRaft(srv.opts, srv.raftNotifyCh)
 	if nil != err {
-		srv.logger.Fatal().Err(err)
+		srv.logger.Fatal().Msg(err.Error())
 	}
 	srv.raftNode = raftNode
 	srv.fsm = fsm
-
 	srv.serfEventCh = make(chan serf.Event, serfEventBacklog)
-	serfNode, err := discovery.SetupSerf(srv.opts.SerfAddress, srv.opts.RaftAddress, srv.opts.SerfJoinAddresses, srv.serfEventCh)
+	serfNode, err := discovery.SetupSerf(srv.opts.SerfAddress, srv.opts.RaftAddress, srv.opts.RpcAddress, srv.opts.SerfJoinAddresses, srv.serfEventCh)
 	if nil != err {
-		srv.logger.Fatal().Err(err)
+		srv.logger.Fatal().Msg(err.Error())
 	}
 	srv.serfNode = serfNode
 
@@ -132,6 +131,7 @@ func (srv *service) eventHandler() {
 
 		select {
 		case <-srv.shutdownCh:
+			srv.serfNode.Shutdown()
 			return
 
 		case e := <-srv.serfEventCh:
@@ -148,11 +148,10 @@ func (srv *service) handleRaftMembers(event serf.Event) error {
 	if !ok {
 		return errors.New(fmt.Sprint("Bad event type", event))
 	}
-
 	switch event.EventType() {
 	case serf.EventMemberJoin, serf.EventMemberUpdate:
 		for _, member := range me.Members {
-			if future := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerAddress]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0); future.Error() != nil {
+			if future := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerId]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0); future.Error() != nil {
 				srv.logger.With().Err(future.Error()).Stack()
 			}
 		}
@@ -162,7 +161,7 @@ func (srv *service) handleRaftMembers(event serf.Event) error {
 		}
 	case serf.EventMemberLeave:
 		for _, member := range me.Members {
-			if future := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerAddress]), 0, 0); future.Error() != nil {
+			if future := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerId]), 0, 0); future.Error() != nil {
 				srv.logger.Err(future.Error()).Stack()
 			}
 		}
@@ -181,14 +180,14 @@ func (srv *service) reconcileMember() {
 	for _, member := range srv.serfNode.Members() {
 		switch member.Status {
 		case serf.StatusAlive:
-			err := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerAddress]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0).Error()
+			err := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerId]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0).Error()
 			if nil != err {
 				srv.logger.Error().Stack().Err(err)
 			}
 		case serf.StatusFailed:
 			srv.logger.Error().Msgf("serf status failed, service:%s", member.Tags[discovery.ServerAddress])
 		case serf.StatusLeft:
-			err := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerAddress]), 0, 0).Error()
+			err := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerId]), 0, 0).Error()
 			if nil != err {
 				srv.logger.Error().Stack().Err(err)
 			}
@@ -213,9 +212,9 @@ func (srv *service) trackLeaderChanges() {
 				continue
 			}
 
-			trackLeaderAddress := string(leaderObs.LeaderAddr)
-			if srv.leaderAddress.Load() != trackLeaderAddress {
-				srv.leaderAddress.Store(trackLeaderAddress)
+			trackLeaderId := string(leaderObs.LeaderID)
+			if srv.leaderRpcAddress.Load() != trackLeaderId {
+				srv.leaderRpcAddress.Store(trackLeaderId)
 			}
 		case <-srv.shutdownCh:
 			srv.raftNode.DeregisterObserver(observer)
@@ -234,7 +233,7 @@ func (srv *service) monitorLeadership() {
 			case isLeader:
 				srv.isLeader.Store(true) // current node is leader
 				if weAreLeaderCh != nil {
-					srv.logger.Error().Msg("attempted to start the leaderAddress loop while running")
+					srv.logger.Error().Stack().Msg("attempted to start the leaderAddress loop while running")
 					continue
 				}
 
@@ -249,7 +248,7 @@ func (srv *service) monitorLeadership() {
 			default:
 				srv.isLeader.Store(false) // current node is not leader
 				if weAreLeaderCh == nil {
-					srv.logger.Error().Msg("attempted to stop the leaderAddress loop while not running")
+					srv.logger.Error().Stack().Msg("attempted to stop the leaderAddress loop while not running")
 					continue
 				}
 
@@ -308,7 +307,7 @@ func (srv *service) forwardRequest() {
 	for {
 		select {
 		case data := <-srv.forwardApplyCh:
-			conn, err := rpc.CreateLeaderConn(srv.leaderAddress.Load())
+			conn, err := rpc.CreateLeaderConn(srv.leaderRpcAddress.Load())
 			if nil != err {
 				srv.applyResCh <- err
 			} else {
@@ -366,5 +365,5 @@ func (srv *service) GetRaftStats(c *fiber.Ctx) error {
 }
 
 func (srv *service) Shutdown() {
-	srv.shutdownCh <- struct{}{}
+	close(srv.shutdownCh)
 }

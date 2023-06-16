@@ -41,5 +41,5 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&Bootstrap, "bootstrap", false, "whether this raft node need to bootstrap")
 
 	rootCmd.PersistentFlags().StringVar(&SerfAddress, "serfAddress", "", "Serf server listen address")
-	rootCmd.PersistentFlags().StringArrayVar(&SerfJoinAddresses, "serfJoinAddr", []string{}, "address to join serf cluster")
+	rootCmd.PersistentFlags().StringArrayVar(&SerfJoinAddresses, "joinAddress", []string{}, "address to join serf cluster")
 }

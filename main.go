@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 )
 
+// TODO: kill 掉当前Leader时，并没有移除kill的leader节点，导致新的leader会一直连接到掉线的机器上
 func main() {
 	cmd.Execute()
 
@@ -27,8 +29,8 @@ func main() {
 	}))
 
 	v1 := app.Group("/api/v1")
-	v1.Get("/set", srv.SetValue)
-	v1.Post("/get", srv.GetValue)
+	v1.Post("/set", srv.SetValue)
+	v1.Get("/get", srv.GetValue)
 
 	maintain := app.Group("/api/maintain")
 	maintain.Get("/stats", srv.GetRaftStats)
@@ -48,6 +50,8 @@ func handleSignal(srv service.Service) {
 		case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
 			log.Println("system shutdown...")
 			srv.Shutdown()
+			time.Sleep(time.Second * 3)
+			os.Exit(0)
 		default:
 			fmt.Println("other signal", s)
 		}

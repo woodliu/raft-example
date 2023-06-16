@@ -6,7 +6,6 @@ import (
 	raft2 "github.com/woodliu/raft-example/src/raft"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"log"
 	"net"
 
 	"google.golang.org/grpc"
@@ -29,14 +28,14 @@ func NewRpcServer(address string, raftNode *raft.Raft) *Server {
 func (s *Server) StartRpc() {
 	listener, err := net.Listen("tcp", s.address)
 	if err != nil {
-		log.Fatalf("net.Listen err: %v", err)
+		logger.Fatal().Stack().Msgf("net.Listen err: %v", err)
 	}
 	grpcServer := grpc.NewServer()
-	RegisterForwardServer(grpcServer, &Server{})
+	RegisterForwardServer(grpcServer, s)
 
 	err = grpcServer.Serve(listener)
 	if err != nil {
-		log.Fatalf("grpcServer.Serve err: %v", err)
+		logger.Fatal().Stack().Msgf("grpcServer.Serve err: %v", err)
 	}
 }
 
@@ -50,9 +49,5 @@ func (s *Server) Route(ctx context.Context, req *RequestForward) (*RequestForwar
 		return nil, st.Err()
 	}
 
-	st, _ := status.New(codes.OK, "raft apply successfully").WithDetails(&RequestForwardResponse{
-		Code:    0,
-		Message: "ok",
-	})
-	return nil, st.Err()
+	return &RequestForwardResponse{}, nil
 }

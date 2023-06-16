@@ -6,7 +6,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
-	"log"
 	"os"
 )
 
@@ -32,7 +31,7 @@ func ForwardRequest(conn *grpc.ClientConn, data []byte) error {
 	if err != nil {
 		fromError, ok := status.FromError(err)
 		if !ok {
-			log.Fatal(err)
+			logger.Fatal().Stack().Msg(err.Error())
 		}
 		for _, detail := range fromError.Details() {
 			detail1 := detail.(*RequestForwardResponse)

@@ -28,7 +28,7 @@ func newRaftTransport(opts *opts) (*raft.NetworkTransport, error) {
 
 func setupRaft(opts *opts, raftNotifyCh chan bool) (*raft.Raft, raft2.FSM, error) {
 	raftConfig := raft.DefaultConfig()
-	raftConfig.LocalID = raft.ServerID(opts.RaftAddress)
+	raftConfig.LocalID = raft.ServerID(opts.RpcAddress)
 	raftConfig.Logger = hclog.New(&hclog.LoggerOptions{
 		Name:       "raft",
 		Output:     os.Stdout,
