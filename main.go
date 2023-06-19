@@ -15,7 +15,6 @@ import (
 	"time"
 )
 
-// TODO: kill 掉当前Leader时，并没有移除kill的leader节点，导致新的leader会一直连接到掉线的机器上
 func main() {
 	cmd.Execute()
 
