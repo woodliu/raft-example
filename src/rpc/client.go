@@ -2,17 +2,33 @@ package rpc
 
 import (
 	"context"
-	"github.com/rs/zerolog"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/logging"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/retry"
+	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/timeout"
+	"github.com/woodliu/raft-example/src/utils"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
-	"os"
+	"time"
 )
 
-var logger = zerolog.New(os.Stdout).With().Timestamp().Caller().Logger()
+var (
+	rpcForwardLatency = []string{"rpc", "forward", "seconds"}
+)
 
-func CreateLeaderConn(leaderAddress string) (*grpc.ClientConn, error) {
-	conn, err := grpc.Dial(leaderAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+func CreateLeaderConn(loggerCtx context.Context, leaderIp string) (*grpc.ClientConn, error) {
+	opts := []retry.CallOption{
+		retry.WithBackoff(retry.BackoffExponential(100 * time.Millisecond)),
+	}
+	conn, err := grpc.NewClient(
+		leaderIp,
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			retry.UnaryClientInterceptor(opts...),
+			timeout.UnaryClientInterceptor(3*time.Second),
+			logging.UnaryClientInterceptor(interceptorLogger(utils.LoggerFromContext(loggerCtx)), loggingOpts...)),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -20,26 +36,21 @@ func CreateLeaderConn(leaderAddress string) (*grpc.ClientConn, error) {
 	return conn, nil
 }
 
-func ForwardRequest(conn *grpc.ClientConn, data []byte) error {
-	defer conn.Close()
-
-	req := RequestForward{
+func Apply(conn *grpc.ClientConn, data []byte) error {
+	req := ApplyRequest{
 		Data: data,
 	}
 
-	_, err := NewForwardClient(conn).Route(context.Background(), &req)
-	if err != nil {
-		fromError, ok := status.FromError(err)
-		if !ok {
-			logger.Fatal().Stack().Msg(err.Error())
-		}
-		for _, detail := range fromError.Details() {
-			detail1 := detail.(*RequestForwardResponse)
-			logger.Error().Msg(detail1.Message)
-		}
+	s := time.Now()
+	_, err := NewForwardClient(conn).Apply(context.Background(), &req)
+	utils.PromSink.AddSample(rpcForwardLatency, float32(time.Since(s).Seconds()))
+	return err
+}
 
-		return err
+func RemoveServer(conn *grpc.ClientConn, serverId string) error {
+	req := ShutdownRequest{
+		ServerId: serverId,
 	}
-
-	return nil
+	_, err := NewForwardClient(conn).Shutdown(context.Background(), &req)
+	return err
 }

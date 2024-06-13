@@ -1,14 +1,13 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/logger"
-	recover2 "github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/woodliu/raft-example/cmd"
-	"github.com/woodliu/raft-example/src/service"
+	"github.com/woodliu/raft-example/cli"
+	"github.com/woodliu/raft-example/src/http"
+	"github.com/woodliu/raft-example/src/raft"
+	"github.com/woodliu/raft-example/src/utils"
 	_ "go.uber.org/automaxprocs"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,43 +15,47 @@ import (
 )
 
 func main() {
-	cmd.Execute()
+	logger := utils.CreateLogger()
+	loggerCtx := utils.ContextWithLogger(context.Background(), logger)
 
-	srv := service.SetUpServer()
-	app := fiber.New()
-	app.Use(recover2.New(recover2.Config{
-		EnableStackTrace: true,
-	}))
-	app.Use(logger.New(logger.Config{
-		Format: "[${time}] ${status} - ${latency} ${method} ${path} ${body}\n",
-	}))
+	raftSrv := raft.NewRaft(loggerCtx, &raft.Opts{
+		RaftAddress: cli.RaftAddress,
+		RpcAddress:  cli.RpcAddress,
 
-	v1 := app.Group("/api/v1")
-	v1.Post("/set", srv.SetValue)
-	v1.Get("/get", srv.GetValue)
+		DataDir:   cli.DataDir,
+		Bootstrap: cli.Bootstrap,
 
-	maintain := app.Group("/api/maintain")
-	maintain.Get("/stats", srv.GetRaftStats)
+		SerfAddress:       cli.SerfAddress,
+		SerfJoinAddresses: cli.SerfJoinAddresses.Value(),
+	})
 
-	// wait for signal
-	go handleSignal(srv)
+	app := fiber.New(fiber.Config{
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+	})
 
-	log.Fatal(app.Listen(cmd.HttpAddress))
-}
-
-func handleSignal(srv service.Service) {
-	// wait for signal
-	signalCh := make(chan os.Signal, 10)
-	signal.Notify(signalCh, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	for s := range signalCh {
-		switch s {
-		case syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
-			log.Println("system shutdown...")
-			srv.Shutdown()
-			time.Sleep(time.Second * 3)
-			os.Exit(0)
-		default:
-			fmt.Println("other signal", s)
-		}
+	err := http.StartServer(loggerCtx, app, raftSrv)
+	if err != nil {
+		logger.Sugar().Panic(err)
 	}
+
+	go func() {
+		if err := app.Listen(cli.HttpAddress); err != nil {
+			logger.Sugar().Panic(err)
+		}
+	}()
+
+	c := make(chan os.Signal, 10)
+	// We'll accept graceful shutdowns when quit via SIGINT (Ctrl+C)
+	// SIGKILL, SIGQUIT or SIGTERM (Ctrl+/) will not be caught.
+	signal.Notify(c, os.Interrupt, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	<-c
+
+	logger.Sugar().Infoln("system shutdown...")
+	app.ShutdownWithTimeout(time.Second * 3)
+
+	raftSrv.Shutdown(loggerCtx)
+	time.Sleep(time.Second * 3)
+	os.Exit(0)
 }

@@ -2,15 +2,26 @@ syntax = "proto3";
 
 package proto;
 option go_package = "./rpc";
-message RequestForward{
+message ApplyRequest{
   bytes data = 1;
 }
 
-message RequestForwardResponse{
+message ApplyResponse{
   int32 code = 1;
   string message = 2;
 }
 
+message ShutdownRequest{
+  string serverId = 1;
+}
+
+message ShutdownResponse{
+  int32 code = 1;
+  string message = 2;
+}
+
+
 service Forward{
-  rpc Route (RequestForward) returns (RequestForwardResponse){};
+  rpc Apply (ApplyRequest) returns (ApplyResponse){};
+  rpc Shutdown (ShutdownRequest) returns (ShutdownResponse){};
 }

@@ -1,23 +1,35 @@
 package raft
 
 import (
-	"encoding/json"
+	"context"
+	"github.com/armon/go-metrics"
+	"github.com/goccy/go-json"
 	"github.com/hashicorp/raft"
-	"github.com/rs/zerolog"
+	"github.com/woodliu/raft-example/src/utils"
+	"go.uber.org/zap"
 	"io"
-	"os"
 	"sync"
+	"time"
+)
+
+var (
+	fsmApplyLatency = []string{"fsm", "apply", "seconds"}
+	fsmGetSeconds   = []string{"fsm", "get", "seconds"}
+	fsmPersistTotal = []string{"fsm", "persist", "total"}
+	fsmRestoreTotal = []string{"fsm", "restore", "total"}
 )
 
 type FSM interface {
 	Get(key string) string
+	Marshal() ([]byte, error)
 }
 
 type Fsm struct {
 	data   *FsmData
-	logger zerolog.Logger
+	logger *zap.SugaredLogger
 }
 
+// Custom Implementation begin
 type FsmData struct {
 	entries map[string]string
 	sync.RWMutex
@@ -31,21 +43,21 @@ func (f *Fsm) Set(k, v string) error {
 }
 
 func (f *Fsm) Get(k string) string {
-	f.data.Lock()
-	defer f.data.Unlock()
+	f.data.RLock()
+	defer f.data.RUnlock()
 	return f.data.entries[k]
 }
 
 // Marshal serializes cache data
-func (fData *FsmData) Marshal() ([]byte, error) {
-	fData.RLock()
-	defer fData.RUnlock()
-	dataBytes, err := json.Marshal(fData.entries)
+func (f *Fsm) Marshal() ([]byte, error) {
+	f.data.RLock()
+	defer f.data.RUnlock()
+	dataBytes, err := json.Marshal(f.data.entries)
 	return dataBytes, err
 }
 
 // UnMarshal deserializes cache data
-func (fData *FsmData) UnMarshal(serialized io.ReadCloser) error {
+func (f *Fsm) UnMarshal(serialized io.ReadCloser) error {
 	defer serialized.Close()
 
 	var newData map[string]string
@@ -53,18 +65,18 @@ func (fData *FsmData) UnMarshal(serialized io.ReadCloser) error {
 		return err
 	}
 
-	fData.Lock()
-	fData.entries = newData
-	fData.Unlock()
+	f.data.Lock()
+	f.data.entries = newData
+	f.data.Unlock()
 	return nil
 }
 
-func NewFsm() *Fsm {
+func newFsm(ctx context.Context) *Fsm {
 	return &Fsm{
 		data: &FsmData{
 			entries: make(map[string]string),
 		},
-		logger: zerolog.New(os.Stdout).With().Timestamp().Caller().Logger().With().Str("component", "fsm").Logger(),
+		logger: utils.LoggerFromContext(ctx).Sugar(),
 	}
 }
 
@@ -76,22 +88,33 @@ type LogEntryData struct {
 // Apply applies a Raft log entry to the key-value store.
 func (f *Fsm) Apply(logEntry *raft.Log) interface{} {
 	log := LogEntryData{}
+	// Because the data come from http body and encode as json, so decode as json here
 	if err := json.Unmarshal(logEntry.Data, &log); err != nil {
-		f.logger.Error().Stack().Msg("Unmarshalling fsm entries failed")
+		f.logger.Errorln("Unmarshalling fsm entries failed")
 		return err
 	}
 
+	s := time.Now()
 	ret := f.Set(log.Key, log.Value)
-	f.logger.Info().Msgf("fms.Apply(), logEntry:%s, ret:%v\n", logEntry.Data, ret)
+	utils.PromSink.AddSample(fsmApplyLatency, float32(time.Since(s).Seconds()))
+	f.logger.Infof("fms.Apply(), logEntry:%s, ret:%v\n", logEntry.Data, ret)
 	return ret
 }
 
-// Snapshot returns a latest snapshot
+// Custom Implementation end
+
+// Snapshot returns the latest snapshot
 func (f *Fsm) Snapshot() (raft.FSMSnapshot, error) {
-	return &snapshot{data: f.data}, nil
+	return &snapshot{fsm: f}, nil
 }
 
 // Restore stores the key-value store to a previous state.
 func (f *Fsm) Restore(serialized io.ReadCloser) error {
-	return f.data.UnMarshal(serialized)
+	err := f.UnMarshal(serialized)
+	if err != nil {
+		utils.PromSink.IncrCounterWithLabels(fsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
+		return err
+	}
+	utils.PromSink.IncrCounterWithLabels(fsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "success"}})
+	return nil
 }
