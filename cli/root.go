@@ -76,7 +76,7 @@ func init() {
 			&cli.BoolFlag{
 				Name:        "bootstrap",
 				Required:    false,
-				Value:       false,
+				Value:       true,
 				Usage:       "Whether this raft node need to bootstrap",
 				Destination: &Bootstrap,
 				Category:    "Raft",

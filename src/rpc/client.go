@@ -16,12 +16,12 @@ var (
 	rpcForwardLatency = []string{"rpc", "forward", "seconds"}
 )
 
-func CreateLeaderConn(loggerCtx context.Context, leaderIp string) (*grpc.ClientConn, error) {
+func CreateLeaderConn(loggerCtx context.Context, leaderAddr string) (*grpc.ClientConn, error) {
 	opts := []retry.CallOption{
 		retry.WithBackoff(retry.BackoffExponential(100 * time.Millisecond)),
 	}
 	conn, err := grpc.NewClient(
-		leaderIp,
+		leaderAddr,
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithChainUnaryInterceptor(

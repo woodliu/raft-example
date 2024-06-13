@@ -52,7 +52,7 @@ func newRaftTransport(opts *Opts) (*raft.NetworkTransport, error) {
 
 func setupRaft(loggerCtx context.Context, opts *Opts, raftNotifyCh chan bool) (*raft.Raft, FSM, error) {
 	raftConfig := raft.DefaultConfig()
-	raftConfig.LocalID = raft.ServerID(opts.RpcAddress)
+	raftConfig.LocalID = raft.ServerID(opts.SerfAddress)
 	// Set up a channel for reliable leaderAddress notifications.
 	raftConfig.NotifyCh = raftNotifyCh
 	raftConfig.Logger = hclog.New(&hclog.LoggerOptions{
@@ -93,6 +93,7 @@ func setupRaft(loggerCtx context.Context, opts *Opts, raftNotifyCh chan bool) (*
 		if err != nil {
 			return nil, nil, err
 		}
+
 		if !hasState {
 			configuration := raft.Configuration{
 				Servers: []raft.Server{
@@ -112,12 +113,13 @@ func setupRaft(loggerCtx context.Context, opts *Opts, raftNotifyCh chan bool) (*
 	fsm := newFsm(loggerCtx)
 	raftNode, err := raft.NewRaft(raftConfig, fsm, logStore, stableStore, snapshotStore, transport)
 
-	future := raftNode.GetConfiguration() //TODO:delete
+	future := raftNode.GetConfiguration()
 	configuration := future.Configuration()
-	for _, v := range configuration.Servers {
-		fmt.Println("configuration server===>", v.ID, v.Address, v.Suffrage)
+	for _, v := range configuration.Servers { //For kubernetes, you need to add the endpoints serf address
+		if string(v.ID) != opts.SerfAddress {
+			opts.SerfJoinAddresses = append(opts.SerfJoinAddresses, string(v.ID))
+		}
 	}
-	fmt.Println("localID===>", opts.RpcAddress)
 
 	if err != nil {
 		return nil, nil, err
@@ -176,7 +178,7 @@ type raftSrv struct {
 
 func NewRaft(loggerCtx context.Context, opts *Opts) Raft {
 	var srv raftSrv
-	srv.id = opts.RpcAddress
+	srv.id = opts.SerfAddress
 	srv.serfNodesId.Store(srv.id, struct{}{})
 	srv.opts = opts
 	srv.logger = utils.LoggerFromContext(loggerCtx).Sugar()
@@ -257,7 +259,6 @@ func (srv *raftSrv) handleRaftMembers(event serf.Event) error {
 		if srv.isLeader.Load() {
 			for _, member := range me.Members {
 				utils.PromSink.IncrCounterWithLabels(raftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "update"}})
-				fmt.Println("addvoter id,address===>", member.Tags[discovery.ServerId], member.Tags[discovery.ServerAddress])
 				if future := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerId]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0); future.Error() != nil {
 					srv.logger.Errorf("raft add node %s failed:%s", member.Tags[discovery.ServerId], future.Error())
 				} else {
@@ -472,11 +473,11 @@ func (srv *raftSrv) Shutdown(loggerCtx context.Context) {
 		if err != nil {
 			logger.Errorf("forward remove raft server %s failed %v", srv.leaderAddr.Load(), err.Error())
 		}
-	} else {
-		future := srv.raftNode.RemoveServer(raft.ServerID(srv.id), 0, 0)
-		if err := future.Error(); err != nil {
-			logger.Errorf("remove leader %s failed %v", srv.leaderAddr.Load(), err.Error())
-		}
+		//} else {
+		//	future := srv.raftNode.RemoveServer(raft.ServerID(srv.id), 0, 0) //doesn't remove leader itself, serf will remove it when timeout
+		//	if err := future.Error(); err != nil {
+		//		logger.Errorf("remove leader %s failed %v", srv.leaderAddr.Load(), err.Error())
+		//	}
 	}
 
 Exit:
