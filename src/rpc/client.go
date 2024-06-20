@@ -12,10 +12,6 @@ import (
 	"time"
 )
 
-var (
-	rpcForwardLatency = []string{"rpc", "forward", "seconds"}
-)
-
 func CreateLeaderConn(loggerCtx context.Context, leaderAddr string) (*grpc.ClientConn, error) {
 	opts := []retry.CallOption{
 		retry.WithBackoff(retry.BackoffExponential(100 * time.Millisecond)),
@@ -43,7 +39,7 @@ func Apply(conn *grpc.ClientConn, data []byte) error {
 
 	s := time.Now()
 	_, err := NewForwardClient(conn).Apply(context.Background(), &req)
-	utils.PromSink.AddSample(rpcForwardLatency, float32(time.Since(s).Seconds()))
+	utils.PromSink.AddSample(utils.RpcForwardLatencySummary, float32(time.Since(s).Seconds()))
 	return err
 }
 

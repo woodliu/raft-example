@@ -14,23 +14,23 @@ type snapshot struct {
 func (s *snapshot) Persist(sink raft.SnapshotSink) error {
 	snapshotBytes, err := s.fsm.Marshal()
 	if err != nil {
-		utils.PromSink.IncrCounterWithLabels(fsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
+		utils.PromSink.IncrCounterWithLabels(utils.FsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
 		sink.Cancel()
 		return err
 	}
 
 	if _, err := sink.Write(snapshotBytes); err != nil {
-		utils.PromSink.IncrCounterWithLabels(fsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
+		utils.PromSink.IncrCounterWithLabels(utils.FsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
 		sink.Cancel()
 		return err
 	}
 
 	if err := sink.Close(); err != nil {
-		utils.PromSink.IncrCounterWithLabels(fsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
+		utils.PromSink.IncrCounterWithLabels(utils.FsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
 		sink.Cancel()
 		return err
 	}
-	utils.PromSink.IncrCounterWithLabels(fsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "success"}})
+	utils.PromSink.IncrCounterWithLabels(utils.FsmPersistTotal, 1, []metrics.Label{{Name: "state", Value: "success"}})
 	return nil
 }
 

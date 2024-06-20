@@ -240,15 +240,6 @@ func (srv *raftSrv) eventHandler() {
 	}
 }
 
-var (
-	raftEventMemberState     = []string{"raft", "member", "event", "state"}
-	raftReconcileMemberState = []string{"raft", "member", "reconcile", "state"}
-
-	raftLeaderChangeTotal = []string{"raft", "leader", "change", "total"}
-	raftIsLeader          = []string{"raft", "is", "leader"}
-	raftApplyLatency      = []string{"raft", "apply", "seconds"}
-)
-
 func (srv *raftSrv) handleRaftMembers(event serf.Event) error {
 	me, ok := event.(serf.MemberEvent)
 	if !ok {
@@ -258,7 +249,7 @@ func (srv *raftSrv) handleRaftMembers(event serf.Event) error {
 	case serf.EventMemberJoin, serf.EventMemberUpdate:
 		if srv.isLeader.Load() {
 			for _, member := range me.Members {
-				utils.PromSink.IncrCounterWithLabels(raftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "update"}})
+				utils.PromSink.IncrCounterWithLabels(utils.RaftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "update"}})
 				if future := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerId]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0); future.Error() != nil {
 					srv.logger.Errorf("raft add node %s failed:%s", member.Tags[discovery.ServerId], future.Error())
 				} else {
@@ -270,7 +261,7 @@ func (srv *raftSrv) handleRaftMembers(event serf.Event) error {
 		for _, member := range me.Members {
 			srv.serfNodesId.Delete(member.Tags[discovery.ServerId])
 			if srv.isLeader.Load() {
-				utils.PromSink.IncrCounterWithLabels(raftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "failed"}})
+				utils.PromSink.IncrCounterWithLabels(utils.RaftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "failed"}})
 				srv.logger.Warnf("member failed, server id:%s", member.Tags[discovery.ServerId])
 			}
 		}
@@ -278,7 +269,7 @@ func (srv *raftSrv) handleRaftMembers(event serf.Event) error {
 		for _, member := range me.Members {
 			if srv.isLeader.Load() {
 				srv.serfNodesId.Delete(member.Tags[discovery.ServerId])
-				utils.PromSink.IncrCounterWithLabels(raftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "leave"}})
+				utils.PromSink.IncrCounterWithLabels(utils.RaftEventMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "leave"}})
 				if future := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerId]), 0, 0); future.Error() != nil {
 					srv.logger.Errorf("raft remove node %s failed:%s", member.Tags[discovery.ServerId], future.Error())
 				}
@@ -300,7 +291,7 @@ func (srv *raftSrv) reconcileMember() {
 		switch member.Status {
 		case serf.StatusAlive:
 			if _, ok := srv.serfNodesId.Load(member.Tags[discovery.ServerId]); !ok {
-				utils.PromSink.IncrCounterWithLabels(raftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "active"}})
+				utils.PromSink.IncrCounterWithLabels(utils.RaftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "active"}})
 				err := srv.raftNode.AddVoter(raft.ServerID(member.Tags[discovery.ServerId]), raft.ServerAddress(member.Tags[discovery.ServerAddress]), 0, 0).Error()
 				if nil != err {
 					srv.logger.Errorln("reconcile add raft failed", err)
@@ -311,11 +302,11 @@ func (srv *raftSrv) reconcileMember() {
 
 		case serf.StatusFailed:
 			srv.serfNodesId.Delete(member.Tags[discovery.ServerId])
-			utils.PromSink.IncrCounterWithLabels(raftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "failed"}})
+			utils.PromSink.IncrCounterWithLabels(utils.RaftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "failed"}})
 			srv.logger.Errorf("serf status failed, server address:%s", member.Tags[discovery.ServerAddress])
 		case serf.StatusLeft:
 			srv.serfNodesId.Delete(member.Tags[discovery.ServerId])
-			utils.PromSink.IncrCounterWithLabels(raftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "left"}})
+			utils.PromSink.IncrCounterWithLabels(utils.RaftReconcileMemberState, 1, []metrics.Label{{Name: "id", Value: member.Tags[discovery.ServerId]}, {Name: "state", Value: "left"}})
 			err := srv.raftNode.RemoveServer(raft.ServerID(member.Tags[discovery.ServerId]), 0, 0).Error()
 			if nil != err {
 				srv.logger.Errorln("reconcile remove raft failed", err)
@@ -342,7 +333,7 @@ func (srv *raftSrv) trackLeaderChanges() {
 				continue
 			}
 
-			utils.PromSink.IncrCounterWithLabels(raftLeaderChangeTotal, 1, []metrics.Label{{Name: "leader", Value: string(leaderObs.LeaderID)}})
+			utils.PromSink.IncrCounterWithLabels(utils.RaftLeaderChangeTotal, 1, []metrics.Label{{Name: "leader", Value: string(leaderObs.LeaderID)}})
 			srv.leaderAddr.Store(string(leaderObs.LeaderID))
 		case <-srv.shutdownCh:
 			srv.raftNode.DeregisterObserver(observer)
@@ -361,7 +352,7 @@ func (srv *raftSrv) monitorLeadership() {
 			switch {
 			case isLeader:
 				if srv.isLeader.CAS(false, true) {
-					utils.PromSink.SetGauge(raftIsLeader, 1)
+					utils.PromSink.SetGauge(utils.RaftIsLeader, 1)
 					ctx, cancel = context.WithCancel(context.Background())
 					leaderLoop.Go(func() error {
 						return srv.leaderLoop(ctx)
@@ -371,7 +362,7 @@ func (srv *raftSrv) monitorLeadership() {
 
 			default:
 				if srv.isLeader.CAS(true, false) {
-					utils.PromSink.SetGauge(raftIsLeader, 0)
+					utils.PromSink.SetGauge(utils.RaftIsLeader, 0)
 					srv.logger.Debugln("shutting down leaderAddress loop")
 					cancel()
 					leaderLoop.Wait()
@@ -439,11 +430,11 @@ func (srv *raftSrv) SetValue(date []byte) error {
 	if srv.isLeader.Load() { // if current node is leader, do raft.Apply directly
 		s := time.Now()
 		srv.applyCh <- date
-		utils.PromSink.AddSampleWithLabels(raftApplyLatency, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "type", Value: "leader"}})
+		utils.PromSink.AddSampleWithLabels(utils.RaftApplyLatencySummary, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "type", Value: "leader"}})
 	} else {
 		s := time.Now()
 		srv.forwardApplyCh <- date
-		utils.PromSink.AddSampleWithLabels(raftApplyLatency, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "type", Value: "forward"}})
+		utils.PromSink.AddSampleWithLabels(utils.RaftApplyLatencySummary, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "type", Value: "forward"}})
 	}
 
 	if err := <-srv.applyResCh; nil != err {

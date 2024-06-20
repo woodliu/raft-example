@@ -12,13 +12,6 @@ import (
 	"time"
 )
 
-var (
-	fsmApplyLatency = []string{"fsm", "apply", "seconds"}
-	fsmGetSeconds   = []string{"fsm", "get", "seconds"}
-	fsmPersistTotal = []string{"fsm", "persist", "total"}
-	fsmRestoreTotal = []string{"fsm", "restore", "total"}
-)
-
 type FSM interface {
 	Get(key string) string
 	Marshal() ([]byte, error)
@@ -96,7 +89,7 @@ func (f *Fsm) Apply(logEntry *raft.Log) interface{} {
 
 	s := time.Now()
 	ret := f.Set(log.Key, log.Value)
-	utils.PromSink.AddSample(fsmApplyLatency, float32(time.Since(s).Seconds()))
+	utils.PromSink.AddSample(utils.FsmApplyLatencySummary, float32(time.Since(s).Seconds()))
 	f.logger.Infof("fms.Apply(), logEntry:%s, ret:%v\n", logEntry.Data, ret)
 	return ret
 }
@@ -112,9 +105,9 @@ func (f *Fsm) Snapshot() (raft.FSMSnapshot, error) {
 func (f *Fsm) Restore(serialized io.ReadCloser) error {
 	err := f.UnMarshal(serialized)
 	if err != nil {
-		utils.PromSink.IncrCounterWithLabels(fsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
+		utils.PromSink.IncrCounterWithLabels(utils.FsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "failed"}})
 		return err
 	}
-	utils.PromSink.IncrCounterWithLabels(fsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "success"}})
+	utils.PromSink.IncrCounterWithLabels(utils.FsmRestoreTotal, 1, []metrics.Label{{Name: "state", Value: "success"}})
 	return nil
 }

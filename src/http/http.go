@@ -15,10 +15,6 @@ import (
 	"time"
 )
 
-var (
-	raftLatency = []string{"raft", "latency", "seconds"}
-)
-
 type Server struct {
 	app    *fiber.App
 	r      raft.Raft
@@ -65,7 +61,7 @@ func (srv *Server) setRouter() {
 func (srv *Server) set(c *fiber.Ctx) error {
 	s := time.Now()
 	err := srv.r.SetValue(c.Body())
-	utils.PromSink.AddSampleWithLabels(raftLatency, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "action", Value: "set"}})
+	utils.PromSink.AddSampleWithLabels(utils.RaftLatencySummary, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "action", Value: "set"}})
 	if err != nil {
 		srv.logger.Errorln(err)
 		c.WriteString(err.Error())
@@ -84,7 +80,7 @@ func (srv *Server) get(c *fiber.Ctx) error {
 	}
 	s := time.Now()
 	value := srv.r.GetValue(req.Key)
-	utils.PromSink.AddSampleWithLabels(raftLatency, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "action", Value: "get"}})
+	utils.PromSink.AddSampleWithLabels(utils.RaftLatencySummary, float32(time.Since(s).Seconds()), []metrics.Label{{Name: "action", Value: "get"}})
 	c.WriteString(value)
 	return c.SendStatus(fiber.StatusOK)
 }
