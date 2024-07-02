@@ -8,7 +8,7 @@ This is a simple raft demo develop up on [hashicorp/raft](hashicorp/raft),
 1. Start 1st raft node:
 
    ```sh
-   $ raft --http-address 0.0.0.0:5000 --raft-address 192.168.1.42:6000 --rpc-address=0.0.0.0:7000 --serf-address 192.168.1.42:8000 --data-dir /node0 --bootstrap true
+   $ raft --http-address 0.0.0.0:5000 --raft-address 192.168.1.42:6000 --rpc-address=0.0.0.0:7000 --serf-address 192.168.1.42:8000 --data-dir /node0 --bootstrap
    ```
 
 2. Start 2st raft node:
